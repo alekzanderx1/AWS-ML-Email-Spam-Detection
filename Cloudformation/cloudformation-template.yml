@@ -1,0 +1,124 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: AWS Email Spam Detection Cloudformation
+Parameters:
+  EndPointURL:
+    Type: String
+Resources:
+ 
+ S3EmailStorageBucketCF:
+    Type: AWS::S3::Bucket
+    DependsOn:
+    - LambdaFunctionEmailCF
+    - LambdaInvokePermission
+    Properties:
+      BucketName: nyu-hw3-email-cloudformation
+      AccessControl: PublicRead
+      NotificationConfiguration:
+          LambdaConfigurations:
+            - Event: s3:ObjectCreated:*
+              Function: !GetAtt LambdaFunctionEmailCF.Arn
+    DeletionPolicy: Retain
+    
+ LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      Action: lambda:InvokeFunction
+      FunctionName: 
+       Fn::GetAtt:
+          - LambdaFunctionEmailCF
+          - Arn
+      Principal: s3.amazonaws.com
+      SourceAccount: 524709025091
+      SourceArn: arn:aws:s3:::nyu-hw3-email-cloudformation
+ 
+ BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: AllowSESPuts
+            Effect: Allow
+            Principal:
+              Service: ses.amazonaws.com
+            Action: s3:PutObject
+            Resource: 
+              Fn::Join: 
+              - ""
+              - 
+                - "arn:aws:s3:::"
+                - 
+                  Ref: S3EmailStorageBucketCF
+                - "/*"
+            Condition:
+              StringEquals:
+                aws:Referer: '524709025091'
+          - Sid: PublicReadForGetBucketObjects
+            Effect: Allow
+            Principal: '*'
+            Action: '*'
+            Resource: !Join
+              - ''
+              - - 'arn:aws:s3:::'
+                - !Ref S3EmailStorageBucketCF
+                - /*
+      Bucket: !Ref S3EmailStorageBucketCF
+ 
+ EmailLambdaRoleCF:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: emaillambdacloudformation-role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+            - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+              - lambda.amazonaws.com
+        Version: 2012-10-17
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSLambdaExecute
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/AmazonSESFullAccess
+        - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+        - arn:aws:iam::aws:policy/CloudWatchEventsFullAccess
+      Path: /
+ 
+ LambdaFunctionEmailCF:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        S3Bucket: hw3-lambda-code-bucket-nyu
+        S3Key: LF1-HW3-17ccb64f-fd3e-4707-8b9a-f11bec6ab947.zip
+      Description: lambda function for email
+      Environment:
+        Variables:
+          ENDPOINT_NAME: !Ref EndPointURL
+      FunctionName: nyu-hw3-email-lambda-cf
+      Handler: lambda_function.lambda_handler
+      MemorySize: 512
+      Role: 
+       Fn::GetAtt:
+          - EmailLambdaRoleCF
+          - Arn
+      Runtime: python3.9
+      Timeout: 60
+ 
+ SESRuleSet:
+  Type: 'AWS::SES::ReceiptRuleSet'
+  Properties: 
+    RuleSetName: hw3-receiving-ruleset
+ 
+ SESRule:
+  Type: 'AWS::SES::ReceiptRule'
+  Properties:
+    Rule:
+      Name: put-to-s3-rule
+      Actions:
+        - S3Action:
+            BucketName: !Ref S3EmailStorageBucketCF
+      Enabled: true
+      ScanEnabled: false
+    RuleSetName: !Ref SESRuleSet
